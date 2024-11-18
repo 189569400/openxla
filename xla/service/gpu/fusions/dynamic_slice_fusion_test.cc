@@ -3050,24 +3050,25 @@ TEST_F(DynamicSliceFusionTest, ReduceScatterDUSLoopIterationOffset) {
   debugoptions.set_xla_gpu_enable_dynamic_slice_fusion(false);
   debugoptions.set_xla_gpu_enable_pipelined_reduce_scatter(false);
   ref_config.set_debug_options(debugoptions);
-  TF_ASSERT_OK_AND_ASSIGN(auto ref_module,
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> ref_module,
                           ParseAndReturnVerifiedModule(hlo_ref, ref_config));
-  TF_ASSERT_OK_AND_ASSIGN(auto ref_module_opt,
+  TF_ASSERT_OK_AND_ASSIGN(ref_module,
                           GetOptimizedModule(std::move(ref_module)));
 
   HloModuleConfig opt_config;
   debugoptions.set_xla_gpu_enable_dynamic_slice_fusion(true);
   opt_config.set_debug_options(debugoptions);
-  TF_ASSERT_OK_AND_ASSIGN(auto module_with_adddress_computation_flag,
-                          ParseAndReturnVerifiedModule(hlo_ref, opt_config));
   TF_ASSERT_OK_AND_ASSIGN(
-      auto module_with_adddress_computation,
-      GetOptimizedModule(std::move(module_with_adddress_computation_flag)));
+      std::unique_ptr<HloModule> module_with_adddress_computation,
+      ParseAndReturnVerifiedModule(hlo_ref, opt_config));
+  TF_ASSERT_OK_AND_ASSIGN(
+      module_with_adddress_computation,
+      GetOptimizedModule(std::move(module_with_adddress_computation)));
 
   std::vector<HloComputation*> address_computations_opt =
       GetDynamicSliceFusions(*module_with_adddress_computation);
   std::vector<HloComputation*> address_computations_ref =
-      GetDynamicSliceFusions(*ref_module_opt);
+      GetDynamicSliceFusions(*ref_module);
   EXPECT_EQ(address_computations_ref.size(), 0);
   ASSERT_EQ(address_computations_opt.size(), 1);
 
@@ -3083,8 +3084,8 @@ TEST_F(DynamicSliceFusionTest, ReduceScatterDUSLoopIterationOffset) {
 
   ErrorSpec error{/*aabs=*/1e-3, /*arel=*/1e-3};
   EXPECT_TRUE(RunAndCompareTwoModulesReplicated(
-      std::move(ref_module_opt), std::move(module_with_adddress_computation),
-      false, true, error));
+      std::move(ref_module), std::move(module_with_adddress_computation), false,
+      true, error));
 }
 
 TEST_F(DynamicSliceFusionTest, ReduceScatterSlice) {

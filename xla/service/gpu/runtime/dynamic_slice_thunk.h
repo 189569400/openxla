@@ -47,7 +47,7 @@ class DynamicSliceThunk : public Thunk {
   // Dynamic slice offset can be either: (1) a statically known constant value
   // or (2) a truly dynamic offset that is computed on device and have to be
   // transferred to host.
-  using Offset = std::variant<uint64_t, BufferAllocation::Slice>;
+  using Offset = std::variant<uint64_t, BufferAllocation::Slice, HloModule*>;
 
   DynamicSliceThunk(
       ThunkInfo thunk_info, std::unique_ptr<ThunkSequence> embedded_thunk,
@@ -56,7 +56,10 @@ class DynamicSliceThunk : public Thunk {
       std::vector<std::optional<std::vector<Offset>>> offsets,
       std::vector<std::optional<Shape>> orig_shapes,
       std::vector<std::optional<Shape>> sliced_shapes,
-      std::vector<std::optional<uint64_t>> offset_byte_sizes);
+      std::vector<std::optional<uint64_t>> offset_byte_sizes,
+      std::unique_ptr<HloModule> while_init,
+      std::unique_ptr<HloModule> while_update,
+      std::vector<std::unique_ptr<HloModule>> fake_offset_modules);
 
   DynamicSliceThunk(const DynamicSliceThunk&) = delete;
   DynamicSliceThunk& operator=(const DynamicSliceThunk&) = delete;
@@ -129,6 +132,16 @@ class DynamicSliceThunk : public Thunk {
 
   // A mapping from argument index to the base offset in the `offsets_allocs_`.
   std::vector<int64_t> offsets_allocs_base_;
+
+  std::unique_ptr<HloModule> while_init_, while_update_;
+  std::vector<std::unique_ptr<HloModule>> fake_offset_modules_;
+
+  // We need a map of replica-id -> induction variable. This is because all the
+  // replicas share the same executable thunk objects. For the same reason we
+  // need a mutex to access this, because flat_hash_map is not thread safe for
+  // mutliple replicas to access concurrently.
+  absl::flat_hash_map<int, Literal> indvar_;
+  absl::Mutex indvar_mutex;
 };
 
 }  // namespace gpu
