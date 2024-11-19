@@ -12,6 +12,7 @@ load("//xla:package_groups.bzl", "xla_package_groups")
 load("//xla:xla.bzl", "xla_bzl_library", "xla_cc_test", "xla_py_proto_library")
 load("//xla/tsl:tsl.bzl", "if_google", "internal_visibility")
 load("//xla/tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
+load("//xla/tsl/mkl:build_defs.bzl", "if_mkldnn_aarch64_acl")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -1142,7 +1143,7 @@ cc_library(
         "debug_options_parsers.h",
     ],
     hdrs = ["debug_options_flags.h"],
-    copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]),
+    copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]) + if_mkldnn_aarch64_acl(["-DDNNL_AARCH64_USE_ACL=1"]),
     visibility = internal_visibility([":friends"]),
     deps =
         [
