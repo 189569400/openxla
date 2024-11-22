@@ -43,7 +43,6 @@ using SourceTargetPair = std::pair<int64_t, int64_t>;
 using SourceTargetPairs = std::vector<SourceTargetPair>;
 
 // Returns true if the (source, target) relationship has a cycle.
-//
 bool HasCycles(const SourceTargetPairs& pairs) {
   // Build a direct graph to check for cycles in (source, target) relationship.
   GraphCycles graph;
@@ -62,8 +61,8 @@ bool HasCycles(const SourceTargetPairs& pairs) {
   };
 
   for (auto pair : pairs) {
-    auto source = get_node_id(pair.first);
-    auto target = get_node_id(pair.second);
+    int source = get_node_id(pair.first);
+    int target = get_node_id(pair.second);
     VLOG(3) << "See source " << source << " -> target " << target;
     if (!graph.InsertEdge(source, target)) {
       VLOG(3) << "Detected cycles";
@@ -79,12 +78,8 @@ bool HasCycles(const SourceTargetPairs& pairs) {
 // with only one input and without any context data.
 bool ShouldDecompose(const HloCollectivePermuteInstruction& collective_permute,
                      int64_t threshold_in_bytes) {
-  // TODO(b/316043789): enable the transformation for the no channel_id case.
-  if (!collective_permute.channel_id().has_value()) {
-    return false;
-  }
-
   const Shape& result_shape = collective_permute.shape();
+
   // Skip the transformation if result is not an array, such as containing
   // context data.
   if (!result_shape.IsArray()) {
@@ -115,7 +110,8 @@ absl::Status DecomposeCollectivePermute(
     HloCollectivePermuteInstruction* collective_permute,
     HloComputation* computation, const std::string& pipeline_decision) {
   // We currently only decompose collective-permute with a channel_id.
-  int64_t channel_id = collective_permute->channel_id().value();
+  auto channel_id = collective_permute->channel_id();
+
   HloInstruction* data = collective_permute->mutable_operand(0);
   const Shape& data_shape = data->shape();
   const OpMetadata& metadata = collective_permute->metadata();
@@ -152,10 +148,10 @@ absl::Status DecomposeCollectivePermute(
   send->add_frontend_attributes(attributes);
   send->set_metadata(metadata);
 
-  HloInstruction* recv_done =
-      computation->AddInstruction(HloInstruction::CreateRecvDone(recv));
-  HloInstruction* send_done =
-      computation->AddInstruction(HloInstruction::CreateSendDone(send));
+  HloInstruction* recv_done = computation->AddInstruction(
+      HloInstruction::CreateRecvDone(recv, channel_id));
+  HloInstruction* send_done = computation->AddInstruction(
+      HloInstruction::CreateSendDone(send, channel_id));
 
   // We will add control dependence to represent how we want to order Send/Recv
   // and other collective operations. Here we only add the necessary control
@@ -258,6 +254,7 @@ absl::StatusOr<bool> CollectivePermuteDecomposer::Run(
   std::vector<HloComputation*> all_computations =
       module->MakeComputationPostOrder(execution_threads);
   absl::flat_hash_set<HloComputation*> while_bodies;
+
   // Process the computation from callers to callees and collect while-body
   // along the way. When we process a computation, we know whether it is a
   // while-body computation or not.
