@@ -245,8 +245,12 @@ def _tag_filters_for_compute_capability(
 
 
 _DEFAULT_IMAGE = "gcr.io/tensorflow-sigs/build:latest-python3.11"
+_ML_BUILD_IMAGE = (
+    "us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest"
+)
 
 _ARM64_JAX_MULTI_PYTHON_IMAGE = "us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/build-arm64:jax-latest-multi-python"
+_ML_BUILD_ARM64_IMAGE = "us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build-arm64:latest"
 
 
 def nvidia_gpu_build_with_compute_capability(
@@ -299,7 +303,7 @@ cpu_arm_tag_filter = (
 _CPU_ARM64_BUILD = Build(
     type_=BuildType.CPU_ARM64,
     repo="openxla/xla",
-    image_url=_ARM64_JAX_MULTI_PYTHON_IMAGE,
+    image_url=_ML_BUILD_ARM64_IMAGE,
     configs=("warnings", "rbe_cross_compile_linux_arm64_xla", "nonccl"),
     target_patterns=_XLA_DEFAULT_TARGET_PATTERNS,
     options={**_DEFAULT_BAZEL_OPTIONS, "build_tests_only": True},
@@ -359,7 +363,7 @@ _MACOS_X86_BUILD = Build(
 _JAX_CPU_BUILD = Build(
     type_=BuildType.JAX_CPU,
     repo="google/jax",
-    image_url=_DEFAULT_IMAGE,
+    image_url=_ML_BUILD_IMAGE,
     configs=(
         "rbe_linux_x86_64",
     ),
