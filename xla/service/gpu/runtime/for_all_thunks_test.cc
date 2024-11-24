@@ -65,8 +65,9 @@ TEST(ForAllThunksTest, DynamicSliceThunk) {
   auto thunk_sequence = std::make_unique<ThunkSequence>();
   thunk_sequence->push_back(std::move(thunk));
 
-  DynamicSliceThunk dynamic_slice_thunk(
-      Thunk::ThunkInfo(), std::move(thunk_sequence), {}, {}, {}, {}, {}, {});
+  DynamicSliceThunk dynamic_slice_thunk(Thunk::ThunkInfo(),
+                                        std::move(thunk_sequence), {}, {}, {},
+                                        {}, {}, {}, nullptr, nullptr, {});
   EXPECT_THAT(GetAllThunks(&dynamic_slice_thunk),
               // `DynamicSliceThunk` wraps the `embedded_thunk` in a
               // `SequentialThunk`, which is why iterate over more than the

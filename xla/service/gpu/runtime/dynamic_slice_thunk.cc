@@ -27,6 +27,8 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/synchronization/mutex.h"
 #include "llvm/ADT/STLExtras.h"
+#include "xla/hlo/evaluator/hlo_evaluator.h"
+#include "xla/literal_util.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/buffer_allocations.h"
 #include "xla/service/gpu/ir_emission_utils.h"
@@ -45,7 +47,22 @@ limitations under the License.
 
 namespace xla {
 namespace gpu {
+namespace {
 
+absl::StatusOr<int> GetReplicaId(
+    Thunk::CollectiveExecuteParams* collective_params) {
+  if (collective_params == nullptr ||
+      collective_params->device_assn == nullptr ||
+      collective_params->device_assn->replica_count() == 1)
+    return 0;
+  GlobalDeviceId global_device_id = collective_params->global_device_id;
+  TF_ASSIGN_OR_RETURN(
+      const DeviceAssignment::LogicalID logical_id,
+      collective_params->device_assn->LogicalIdForDevice(global_device_id));
+  return logical_id.replica_id;
+}
+
+}  // namespace
 DynamicSliceThunk::DynamicSliceThunk(
     ThunkInfo thunk_info, std::unique_ptr<ThunkSequence> embedded_thunk,
     std::vector<std::optional<BufferAllocation::Slice>> arguments,
@@ -53,7 +70,10 @@ DynamicSliceThunk::DynamicSliceThunk(
     std::vector<std::optional<std::vector<Offset>>> offsets,
     std::vector<std::optional<Shape>> orig_shapes,
     std::vector<std::optional<Shape>> sliced_shapes,
-    std::vector<std::optional<uint64_t>> offset_byte_sizes)
+    std::vector<std::optional<uint64_t>> offset_byte_sizes,
+    std::unique_ptr<HloModule> while_init,
+    std::unique_ptr<HloModule> while_update,
+    std::vector<std::unique_ptr<HloModule>> fake_offset_modules)
     : Thunk(Kind::kDynamicSlice, thunk_info),
       embedded_thunk_(std::make_unique<SequentialThunk>(
           ThunkInfo(), std::move(*embedded_thunk))),
@@ -62,7 +82,10 @@ DynamicSliceThunk::DynamicSliceThunk(
       offsets_(offsets),
       orig_shapes_(orig_shapes),
       sliced_shapes_(sliced_shapes),
-      offset_byte_sizes_(offset_byte_sizes) {
+      offset_byte_sizes_(offset_byte_sizes),
+      while_init_(std::move(while_init)),
+      while_update_(std::move(while_update)),
+      fake_offset_modules_(std::move(fake_offset_modules)) {
   // Zip all arguments together to create a list of SliceDef.
   for (auto [arg, offsets, orig_shape, sliced_shape, offset_byte_size] :
        llvm::zip_equal(arguments, offsets, orig_shapes, sliced_shapes,
@@ -119,7 +142,21 @@ absl::Status DynamicSliceThunk::Initialize(const InitializeParams& params) {
       std::unique_ptr<se::MemoryAllocation> allocation,
       params.executor->HostMemoryAllocate(offsets_allocs_size_));
   offsets_allocs_.emplace(params.executor, std::move(allocation));
-
+  TF_ASSIGN_OR_RETURN(auto replica_id, GetReplicaId(params.collective_params));
+  if (!fake_offset_modules_.empty()) {
+    CHECK(while_init_->entry_computation()->num_parameters() == 0)
+        << "Expected no arguments for while init";
+    TF_ASSIGN_OR_RETURN(Literal indvar,
+                        HloEvaluator().Evaluate(*while_init_, {}));
+    {
+      // Writing to the flat_hash_map behind a lock because it is not thread
+      // safe.
+      absl::MutexLock mlock(&indvar_mutex);
+      indvar_[replica_id] = std::move(indvar);
+      VLOG(2) << "For replica id " << replica_id << " indvar initialized to "
+              << indvar_[replica_id].ToString();
+    }
+  }
   return absl::OkStatus();
 }
 
@@ -180,7 +217,28 @@ absl::Status DynamicSliceThunk::ExecuteOnStream(const ExecuteParams& params) {
         VLOG(2) << "  - arg " << argument_idx << "[" << offset_idx
                 << "]: constant offset = " << *const_offset;
         offset_value(argument_idx, offset_idx) = *const_offset;
+      } else if (HloModule** offset_module = std::get_if<HloModule*>(&offset)) {
+        VLOG(0) << "Offset module: " << (*offset_module)->ToString();
+        TF_ASSIGN_OR_RETURN(auto replica_id,
+                            GetReplicaId(params.collective_params));
 
+        // Access indvar behind a lock.
+        indvar_mutex.Lock();
+        Literal indvar = indvar_[replica_id].Clone();
+        indvar_mutex.Unlock();
+
+        TF_ASSIGN_OR_RETURN(
+            Literal offset,
+            HloEvaluator().Evaluate(**offset_module, {indvar.Clone()}));
+        std::optional<int64_t> offset_literal =
+            LiteralUtil::LiteralAsScalarInt64(offset);
+        CHECK(offset_literal != std::nullopt)
+            << "Offset value is expected to be integer. Found "
+            << offset.ToString();
+        offset_value(argument_idx, offset_idx) = *offset_literal;
+        VLOG(2) << "  - arg " << argument_idx << "[" << offset_idx
+                << "]: loop induction variable dependent offset = "
+                << *offset_literal;
       } else {
         // Transfer slice offset value from device to host.
         auto alloc_slice = std::get<BufferAllocation::Slice>(offset);
@@ -250,6 +308,22 @@ absl::Status DynamicSliceThunk::ExecuteOnStream(const ExecuteParams& params) {
 
   // Execute the underlying custom call thunk with the new buffers.
   TF_RETURN_IF_ERROR(embedded_thunk_->ExecuteOnStream(new_params));
+
+  // Before ending, we need to update the induction variable.
+  if (!fake_offset_modules_.empty()) {
+    TF_ASSIGN_OR_RETURN(auto replica_id,
+                        GetReplicaId(params.collective_params));
+    // Update guarded by a mutex lock because flat_hash_map is not thread safe.
+    {
+      absl::MutexLock indvar_mutex_lock(&indvar_mutex);
+      TF_ASSIGN_OR_RETURN(auto updated_value,
+                          HloEvaluator().Evaluate(
+                              *while_update_, {indvar_[replica_id].Clone()}));
+      indvar_[replica_id] = std::move(updated_value);
+      VLOG(2) << "For replica " << replica_id << ", updated indvar to "
+              << indvar_[replica_id].ToString();
+    }
+  }
 
   return absl::OkStatus();
 }
