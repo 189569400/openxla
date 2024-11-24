@@ -149,7 +149,7 @@ absl::StatusOr<ScopedShapedBuffer> CompileAndRunFusion(
     return Internal("No output after a successful verification run.");
   }
 
-  return std::move(profiling_output->output);
+  return profiling_output->output;
 }
 
 absl::Status CompareBuffers(const ScopedShapedBuffer& current,
