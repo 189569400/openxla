@@ -2550,6 +2550,7 @@ absl::Status IrEmitterUnnested::EmitHloInstruction(
         case HloOpcode::kCollectiveBroadcast:
           return EmitNcclAsyncDone(Thunk::kNcclCollectiveBroadcastDone, instr);
         case HloOpcode::kFusion:
+        case HloOpcode::kCall: 
         case HloOpcode::kCustomCall: {
           // Wait until the concurrent stream has finished.
           auto* async_done = Cast<HloAsyncInstruction>(instr);
@@ -2615,6 +2616,9 @@ absl::Status IrEmitterUnnested::EmitHloInstruction(
         }
         case HloOpcode::kCustomCall: {
           return EmitAsyncCustomCallStart(instr);
+        }
+        case HloOpcode::kCall: {
+          return EmitCommandBufferThunk(wrapped);
         }
         default:
           return Internal("Unsupported async start wrapped instruction: %s",
