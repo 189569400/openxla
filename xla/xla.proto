@@ -1060,7 +1060,10 @@ message DebugOptions {
   // be deterministic, although with additional overhead.
   bool xla_gpu_enable_scatter_determinism_expander = 345;
 
-  // Next id: 347
+  // To check if the mkldnn is built with Arm Compute Library (ACL) backend
+  bool xla_cpu_use_mkl_dnn_with_acl = 347;
+
+  // Next id: 348
 
   // Extra options to pass to the compilation backend (e.g. LLVM); specific
   // interpretation of these values is left to the backend.
