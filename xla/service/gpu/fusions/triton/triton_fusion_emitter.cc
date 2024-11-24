@@ -61,7 +61,6 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/DialectRegistry.h"
-#include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
@@ -92,6 +91,7 @@ limitations under the License.
 #include "xla/permutation_util.h"
 #include "xla/service/dump.h"
 #include "xla/service/gpu/backend_configs.pb.h"
+#include "xla/service/gpu/fusions/emitter_loc_op_builder.h"
 #include "xla/service/gpu/fusions/ir/xla_gpu_ops.h"
 #include "xla/service/gpu/fusions/mlir/elemental_hlo_to_mlir.h"
 #include "xla/service/gpu/fusions/transforms/passes.h"
@@ -136,7 +136,6 @@ namespace ttir = ::mlir::triton;
 
 using ::llvm::SmallVector;
 using ::mlir::ArrayRef;
-using ::mlir::ImplicitLocOpBuilder;
 using ::mlir::ShapedType;
 using ::mlir::Type;
 using ::mlir::Value;
@@ -155,22 +154,22 @@ namespace {
 
 using TensorValue = mlir::TypedValue<mlir::RankedTensorType>;
 
-ScalarOrTensor Broadcast(ImplicitLocOpBuilder& b, TensorValue value,
+ScalarOrTensor Broadcast(EmitterLocOpBuilder& b, TensorValue value,
                          ArrayRef<int64_t> shape) {
   return ScalarOrTensor(
       b.create<ttir::BroadcastOp>(value.getType().clone(shape), value));
 }
 
-ScalarOrTensor Range(ImplicitLocOpBuilder& b, int32_t limit) {
+ScalarOrTensor Range(EmitterLocOpBuilder& b, int32_t limit) {
   auto type = mlir::RankedTensorType::get(limit, b.getI32Type());
   return ScalarOrTensor(b.create<ttir::MakeRangeOp>(type, 0, limit));
 }
 
-Value AddPtr(ImplicitLocOpBuilder& b, Value ptr, Value offset) {
+Value AddPtr(EmitterLocOpBuilder& b, Value ptr, Value offset) {
   return b.create<ttir::AddPtrOp>(ptr.getType(), ptr, offset);
 }
 
-ScalarOrTensor EmitParameterLoad(ImplicitLocOpBuilder& b, Value pointer,
+ScalarOrTensor EmitParameterLoad(EmitterLocOpBuilder& b, Value pointer,
                                  ArrayRef<int32_t> boundary_checks) {
   if (auto make_tensor_ptr = pointer.getDefiningOp<ttir::MakeTensorPtrOp>()) {
     if (make_tensor_ptr.getOffsets().empty()) {
@@ -200,14 +199,14 @@ ScalarOrTensor EmitParameterLoad(ImplicitLocOpBuilder& b, Value pointer,
 }
 
 absl::StatusOr<ScalarOrTensor> EmitScope(
-    ImplicitLocOpBuilder& b, absl::string_view libdevice_path,
+    EmitterLocOpBuilder& b, absl::string_view libdevice_path,
     const se::DeviceDescription& device_info,
     const TritonFusionAnalysis* analysis,
     absl::Span<const HloInstruction* const> instructions,
     absl::flat_hash_map<const HloInstruction*, ScalarOrTensor>& values);
 
 absl::StatusOr<ScalarOrTensor> EmitReduce(
-    ImplicitLocOpBuilder& b, const TiledHloInstruction& tiled_hlo_reduce,
+    EmitterLocOpBuilder& b, const TiledHloInstruction& tiled_hlo_reduce,
     absl::flat_hash_map<const TiledHloInstruction*, ScalarOrTensor>& values,
     absl::string_view libdevice_path,
     const se::DeviceDescription& device_info) {
@@ -318,7 +317,7 @@ absl::StatusOr<ScalarOrTensor> EmitReduce(
 //
 // TODO(b/331413981): get rid of this special handling once this is solved.
 absl::StatusOr<ScalarOrTensor> EmitNestedFusion(
-    ImplicitLocOpBuilder& b, absl::string_view libdevice_path,
+    EmitterLocOpBuilder& b, absl::string_view libdevice_path,
     const se::DeviceDescription& device_info,
     const HloFusionInstruction& fusion_instruction,
     absl::flat_hash_map<const HloInstruction*, ScalarOrTensor>& values) {
@@ -349,7 +348,7 @@ absl::StatusOr<ScalarOrTensor> EmitNestedFusion(
 }
 
 ScalarOrTensor EmitTiledBroadcast(
-    ImplicitLocOpBuilder& b, const TiledHloInstruction& tiled_broadcast,
+    EmitterLocOpBuilder& b, const TiledHloInstruction& tiled_broadcast,
     absl::flat_hash_map<const TiledHloInstruction*, ScalarOrTensor>& values) {
   const llvm::SmallVector<int64_t>& input_tile_shape =
       tiled_broadcast.operand(0)->tile_sizes();
@@ -406,7 +405,7 @@ ScalarOrTensor EmitTiledBroadcast(
 }
 
 absl::StatusOr<ScalarOrTensor> EmitTiledIota(
-    ImplicitLocOpBuilder& b, ValueRange tile_multi_index,
+    EmitterLocOpBuilder& b, ValueRange tile_multi_index,
     const TiledHloInstruction& tiled_iota) {
   const HloIotaInstruction* hlo_iota =
       ::xla::Cast<HloIotaInstruction>(tiled_iota.hlo());
@@ -459,7 +458,7 @@ absl::StatusOr<ScalarOrTensor> EmitTiledIota(
 }
 
 // Reshapes a non-0D tensor of shape [1, 1, 1, ...] to a scalar.
-ScalarOrTensor ReshapeTensorToScalar(ImplicitLocOpBuilder& b, Value input) {
+ScalarOrTensor ReshapeTensorToScalar(EmitterLocOpBuilder& b, Value input) {
   auto element_type = mlir::cast<ShapedType>(input.getType()).getElementType();
 
   // First, reshape to a 1D tensor if not already the case. This is needed
@@ -494,7 +493,7 @@ ScalarOrTensor ReshapeTensorToScalar(ImplicitLocOpBuilder& b, Value input) {
   return ScalarOrTensor(reduction.getResult().front());
 }
 
-absl::StatusOr<ScalarOrTensor> EmitTiledReshape(ImplicitLocOpBuilder& b,
+absl::StatusOr<ScalarOrTensor> EmitTiledReshape(EmitterLocOpBuilder& b,
                                                 ArrayRef<int64_t> tile_sizes,
                                                 ScalarOrTensor input) {
   SmallVector<int64_t> padded_tile_sizes = GetPaddedTileSizes(tile_sizes);
@@ -530,7 +529,7 @@ absl::StatusOr<ScalarOrTensor> EmitTiledReshape(ImplicitLocOpBuilder& b,
   return ScalarOrTensor(reshape.getResult());
 }
 
-Value EmitTiledTranspose(ImplicitLocOpBuilder& b, ArrayRef<int64_t> tile_sizes,
+Value EmitTiledTranspose(EmitterLocOpBuilder& b, ArrayRef<int64_t> tile_sizes,
                          SmallVector<int64_t> dimensions, Value input) {
   SmallVector<int64_t> padded_tile_sizes = GetPaddedTileSizes(tile_sizes);
 
@@ -545,7 +544,7 @@ Value EmitTiledTranspose(ImplicitLocOpBuilder& b, ArrayRef<int64_t> tile_sizes,
 }
 
 absl::StatusOr<ScalarOrTensor> EmitTiledBitcast(
-    ImplicitLocOpBuilder& b, const TiledHloInstruction& tiled_bitcast,
+    EmitterLocOpBuilder& b, const TiledHloInstruction& tiled_bitcast,
     Value input) {
   // Any Bitcast is decomposable to a transpose+reshape+transpose.
   auto trt = ShapeUtil::DecomposeBitcastToTrt(
@@ -600,7 +599,7 @@ absl::StatusOr<ScalarOrTensor> EmitTiledBitcast(
 }
 
 absl::StatusOr<ScalarOrTensor> EmitTiledHloInstruction(
-    ImplicitLocOpBuilder& b, absl::string_view libdevice_path,
+    EmitterLocOpBuilder& b, absl::string_view libdevice_path,
     const se::DeviceDescription& device_info,
     const HloFusionInstruction* fusion, const TiledHloInstruction& tiled_hlo,
     mlir::triton::FuncOp fn, ValueRange tile_multi_index,
@@ -704,7 +703,7 @@ absl::StatusOr<ScalarOrTensor> EmitTiledHloInstruction(
 // Emit sequence of instructions using compatible tiling ordered producers
 // before consumers.
 absl::StatusOr<ScalarOrTensor> EmitTiledComputation(
-    ImplicitLocOpBuilder& b, absl::string_view libdevice_path,
+    EmitterLocOpBuilder& b, absl::string_view libdevice_path,
     const se::DeviceDescription& device_info,
     const HloFusionInstruction* fusion,
     const TiledHloComputation& tiled_computation, mlir::triton::FuncOp fn,
@@ -727,7 +726,7 @@ absl::StatusOr<ScalarOrTensor> EmitTiledComputation(
 // Emit sequence of instructions using compatible tiling ordered producers
 // before consumers.
 absl::StatusOr<ScalarOrTensor> EmitScope(
-    ImplicitLocOpBuilder& b, absl::string_view libdevice_path,
+    EmitterLocOpBuilder& b, absl::string_view libdevice_path,
     const se::DeviceDescription& device_info,
     const TritonFusionAnalysis* analysis,
     absl::Span<const HloInstruction* const> instructions,
@@ -790,7 +789,7 @@ absl::StatusOr<ScalarOrTensor> EmitScope(
 // Computes the base pointer offset for the given tile multi-index and hlo shape
 // taking into account the physical layout of the hlo buffer.
 absl::StatusOr<Value> ComputeBasePtrOffset(
-    ImplicitLocOpBuilder b, ValueRange tile_multi_index,
+    EmitterLocOpBuilder& b, ValueRange tile_multi_index,
     const TiledHloInstruction& tiled_hlo) {
   const Shape& shape = tiled_hlo.hlo()->shape();
   Shape linear_shape = ShapeUtil::MakeShape(shape.element_type(),
@@ -818,7 +817,7 @@ absl::StatusOr<Value> ComputeBasePtrOffset(
 namespace ir_emitter_triton_internal {
 
 SmallVector<Value, 3> ComputeDelinearizedTileIndex(
-    ImplicitLocOpBuilder& b,
+    EmitterLocOpBuilder& b,
     absl::Span<const int64_t> num_output_tiles_per_dim) {
   Value pid = b.create<arith::IndexCastUIOp>(
       b.getIndexType(), b.create<ttir::GetProgramIdOp>(ttir::ProgramIDDim::X));
@@ -840,7 +839,7 @@ SmallVector<Value, 3> ComputeDelinearizedTileIndex(
 }
 
 absl::StatusOr<MakeTensorPtrOpAndBoundaryChecks> CreateMakeTensorPtrOp(
-    ImplicitLocOpBuilder& b, ValueRange tile_multi_index,
+    EmitterLocOpBuilder& b, ValueRange tile_multi_index,
     const TiledHloInstruction& tiled_hlo, Value parent_base_ptr) {
   const llvm::SmallVector<int64_t>& tile_strides = tiled_hlo.tile_strides();
   const Shape& shape = tiled_hlo.hlo()->shape();
@@ -950,7 +949,9 @@ absl::Status EmitGeneric(mlir::OpBuilder builder,
       std::get<SymbolicTileAnalysis>(symbolic_tile_analysis_or);
   const HloInstruction* root = computation->root_instruction();
   auto loc = mlir::NameLoc::get(builder.getStringAttr(root->name()));
-  ImplicitLocOpBuilder b(loc, builder);
+  EmitterLocOpBuilder b(
+      loc, builder,
+      !root->GetModule()->config().debug_options().xla_dump_to().empty());
 
   TF_ASSIGN_OR_RETURN(TiledHloComputation tiled_hlo_computation,
                       symbolic_tile_analysis.ComputeTiledHloInstructions(
@@ -1059,17 +1060,20 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
     const BlockLevelParameters& block_level_parameters,
     mlir::MLIRContext& mlir_context) {
   LoadMlirDialectsForTriton(mlir_context);
+  const auto debug_options = fusion->GetModule()->config().debug_options();
 
   const HloComputation* hlo_computation =
       fusion->fused_instructions_computation();
 
-  mlir::OpBuilder b(&mlir_context);
-  auto loc = mlir::NameLoc::get(b.getStringAttr(hlo_computation->name()));
+  auto loc = mlir::NameLoc::get(
+      mlir::StringAttr::get(&mlir_context, hlo_computation->name()));
+  EmitterLocOpBuilder b(loc, &mlir_context,
+                        !debug_options.xla_dump_to().empty());
+
   mlir::OwningOpRef<mlir::ModuleOp> triton_module =
       llvm_ir::CreateMlirModuleOp(loc);
   b.setInsertionPointToEnd(triton_module->getBody());
 
-  const auto debug_options = fusion->GetModule()->config().debug_options();
   // Build Triton kernel.
   SmallVector<Type> fn_arg_types;
   for (HloInstruction* p : hlo_computation->parameter_instructions()) {
@@ -1094,10 +1098,11 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
   }
 
   auto fn = b.create<ttir::FuncOp>(
-      loc, fn_name, b.getFunctionType(fn_arg_types, std::nullopt));
+      fn_name, b.getFunctionType(fn_arg_types, std::nullopt));
   for (int i = 0; i < fn.getNumArguments(); ++i) {
     fn.setArgAttr(i, "tt.divisibility", b.getIntegerAttr(b.getI32Type(), 16));
   }
+
   fn.addEntryBlock();
   b.setInsertionPointToStart(&fn.front());
 
@@ -1118,7 +1123,7 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
     return Internal("Unsupported fusion kind: %s", fusion_kind);
   }
 
-  b.create<ttir::ReturnOp>(loc);
+  b.create<ttir::ReturnOp>();
 
   auto dump_triton_ir = [&]() {
     std::string triton_ir;

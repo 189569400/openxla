@@ -43,6 +43,7 @@ limitations under the License.
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/service/gpu/fusions/emitter_loc_op_builder.h"
 #include "xla/service/gpu/fusions/triton/triton_fusion_emitter.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
 #include "xla/service/gpu/hlo_traversal.h"
@@ -166,7 +167,7 @@ TritonMakeTensorPtrTest::CreateTestTensorPtr(
       llvm_ir::CreateMlirModuleOp(loc);
   builder.setInsertionPointToEnd(triton_module->getBody());
 
-  ImplicitLocOpBuilder b(loc, builder);
+  EmitterLocOpBuilder b(loc, builder);
   auto fn = CreateTritonFunction(b, parent_shape);
 
   SmallVector<Value, 3> tile_multi_index = ComputeDelinearizedTileIndex(

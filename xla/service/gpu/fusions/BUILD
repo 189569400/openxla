@@ -10,6 +10,17 @@ package(
 )
 
 cc_library(
+    name = "emitter_loc_op_builder",  # copybara:keep
+    hdrs = ["emitter_loc_op_builder.h"],
+    visibility = ["//xla/service/gpu/fusions:__subpackages__"],
+    deps = [
+        "@com_google_absl//absl/strings",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_library(
     name = "in_place_dynamic_update_slice_mlir",
     srcs = ["in_place_dynamic_update_slice_mlir.cc"],
     hdrs = ["in_place_dynamic_update_slice_mlir.h"],

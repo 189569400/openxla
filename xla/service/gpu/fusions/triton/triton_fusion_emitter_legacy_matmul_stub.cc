@@ -24,7 +24,7 @@ absl::StatusOr<LaunchDimensions> GetMatMulLaunchDimensions(
   return absl::UnimplementedError("not supported for this build configuration");
 }
 
-absl::Status EmitMatMul(mlir::OpBuilder builder,
+absl::Status EmitMatMul(EmitterLocOpBuilder& builder,
                         absl::string_view libdevice_path,
                         const se::DeviceDescription& device_info,
                         const HloFusionInstruction* fusion,
