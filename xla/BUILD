@@ -1160,6 +1160,7 @@ cc_library(
     deps = [
         "@com_google_absl//absl/base:dynamic_annotations",
         "@eigen_archive//:eigen3",
+        "@eigen_archive//:eigen3:eigen3_test",
     ],
 )
 
