@@ -190,6 +190,25 @@ tsl_gpu_library(
 )
 
 tsl_gpu_library(
+    name = "cupti_pmsampling_collector",
+    srcs = if_cuda(["cupti_pmsampling_collector.cc"]),
+    hdrs = if_cuda(["cupti_pmsampling_collector.h"]),
+    copts = tf_profiler_copts() + tsl_copts(),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cupti_interface",
+        ":cupti_utils",
+        "//xla/tsl/profiler/utils:lock_free_queue",
+        "//xla/tsl/profiler/utils:per_thread",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:span",
+        "@tsl//tsl/platform:env",
+    ],
+)
+
+tsl_gpu_library(
     name = "cupti_profiler",
     srcs = if_cuda(["cupti_profiler.cc"]),
     hdrs = if_cuda(["cupti_profiler.h"]),
@@ -312,18 +331,25 @@ tsl_gpu_library(
         ":cupti_buffer_events",
         ":cupti_interface",
         "//xla/tsl/profiler/utils:lock_free_queue",
+        "//xla/tsl/profiler/utils:math_utils",
         "//xla/tsl/profiler/utils:parse_annotation",
+        "//xla/tsl/profiler/utils:timespan",
         "//xla/tsl/profiler/utils:trace_utils",
         "//xla/tsl/profiler/utils:xplane_builder",
         "//xla/tsl/profiler/utils:xplane_schema",
         "//xla/tsl/profiler/utils:xplane_utils",
+        "@com_google_absl//absl/container:fixed_array",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/hash",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@tsl//tsl/platform:abi",
         "@tsl//tsl/platform:mutex",
         "@tsl//tsl/platform:platform_port",
+        "@tsl//tsl/platform:thread_annotations",
+        "@tsl//tsl/platform:types",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
     ] + if_cuda([
         "//xla/tsl/cuda:cupti",
@@ -388,5 +414,26 @@ xla_test(
         ":cupti_utils",
         "@tsl//tsl/platform:test",
         "@tsl//tsl/platform:test_main",
+    ],
+)
+
+xla_test(
+    name = "cupti_collector_test",
+    size = "small",
+    srcs = ["cupti_collector_test.cc"],
+    backends = ["cpu"],
+    copts = tf_profiler_copts() + tsl_copts(),
+    tags = [
+        "no_mac",
+    ],
+    deps = [
+        ":cupti_collector",
+        ":cupti_tracer",
+        ":cupti_utils",
+        "//xla/tsl/profiler/utils:xplane_builder",
+        "@tsl//tsl/platform:status_matchers",
+        "@tsl//tsl/platform:test",
+        "@tsl//tsl/platform:test_main",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
     ],
 )
