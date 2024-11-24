@@ -39,14 +39,9 @@ struct ReductionGroups {
   std::vector<bool> is_reduction_root;
 };
 
-ReductionGroups GroupDisjointReductions(const HloFusionAnalysis& analysis,
-                                        bool for_mlir);
+ReductionGroups GroupDisjointReductions(const HloFusionAnalysis& analysis);
 
 int RowReductionGetRowsPerWarp(int reduced_dimension_size);
-
-int GetVectorSize(const HloFusionAnalysis& analysis,
-                  const ReductionDimensions& reduction_dimensions,
-                  int num_threads, Vector3 reduction_tiling);
 
 int GetVectorSizeForMlir(const HloFusionAnalysis& analysis, int64_t minor_dim,
                          int num_threads);
